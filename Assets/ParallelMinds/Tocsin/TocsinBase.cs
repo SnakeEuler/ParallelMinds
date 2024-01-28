@@ -1,94 +1,80 @@
 using System;
-using System.Collections;
-using System.Collections.Generic;
-using UnityEngine;
+
 namespace Tocsin {
+// TocsinBase: Abstract base class for Tocsin event system.
 public abstract class TocsinBase<TDelegate>: ILinkBase<TDelegate> where TDelegate : class {
-  public uint PersistentListenerCount { get { return pCount; } }
-  public uint NonceListenerCount { get { return nCount; } }
+  public uint PersistentListenerCount => pCount;
+  public uint NonceListenerCount => nCount;
 
   protected bool hasLink = false;
-
   protected TDelegate[] listeners = new TDelegate[1];
   protected uint pCount = 0;
-  protected uint pCap = 0;
+  private uint pCap = 0;
 
   protected TDelegate[] nonceListeners;
   protected uint nCount = 0;
-  protected uint nCap = 0;
+  private uint nCap = 0;
 
-  protected static IndexOutOfRangeException eIOOR = new IndexOutOfRangeException (
-  "Fewer listeners than expected. See guidelines in on using RemoveListener and RemoveAll within Tocsin listeners.");
+  protected static readonly IndexOutOfRangeException eIOOR = new IndexOutOfRangeException (
+  "Fewer listeners than expected. See guidelines on using RemoveListener and RemoveAll within Tocsin listeners.");
 
+  // Check if a listener is already added.
+  public bool Contains (TDelegate listener) => Contains (listeners, pCount, listener);
 
-  public bool Contains (TDelegate listener) { return Contains (listeners, pCount, listener); }
+  // Add a new listener to the event system.
   public bool AddListener (TDelegate listener, bool allowDuplicates = false) {
     if (!allowDuplicates && Contains (listener)) return false;
-    if (pCount >= pCap) {// Changed from == to >= to handle the case where pCap might be 0
-      if (pCap == 0) {
-        pCap = 1;// Set a starting capacity if it was 0
-      } else {
-        pCap *= 2;// Otherwise, double the capacity
-      }
+    if (pCount >= pCap) {
+      pCap = pCap == 0? 1 : pCap * 2;
       listeners = Expand (listeners, pCap, pCount);
     }
-    listeners[pCount] = listener;
-    pCount++;
+    listeners[pCount ++] = listener;
     return true;
   }
 
+  // Bind a listener with the Tocsin system.
   public ITocsinBinding BindListener (TDelegate listener, bool allowDuplicates = false) {
-    if (AddListener (listener, allowDuplicates)) {
-
-      return new TocsinBinding<TDelegate> (this, listener, allowDuplicates, true);
-
-    }
-    return null;
+    return AddListener (listener, allowDuplicates)
+        ? new TocsinBinding<TDelegate> (this, listener, allowDuplicates, true) : null;
   }
+
+  // Add a nonce (single-use) listener.
   public bool AddNonce (TDelegate listener, bool allowDuplicates = false) {
     if (!allowDuplicates && Contains (nonceListeners, nCount, listener)) return false;
-    if (nCount == nCap) {
-      if (nCap == 0) {
-        nCap = 1;
-      } else {
-        nCap *= 2;
-      }
+    if (nCount >= nCap) {
+      nCap = nCap == 0? 1 : nCap * 2;
       nonceListeners = Expand (nonceListeners, nCap, nCount);
     }
-    nonceListeners[nCount] = listener;
-    ++ nCount;
-
+    nonceListeners[nCount ++] = listener;
     return true;
   }
 
+  // Remove a specific listener.
   public bool RemoveListener (TDelegate listener) {
-    bool result = false;
     for (uint i = 0;i < pCount;++ i) {
       if (listeners[i].Equals (listener)) {
         RemoveAt (i);
-        result = true;
-        break;
+        return true;
       }
     }
-    return result;
+    return false;
   }
 
+  // Remove a specific nonce listener.
   public bool RemoveNonceListener (TDelegate listener) {
-    bool result = false;
-    for (uint i = 0;i < pCount;++ i) {
+    for (uint i = 0;i < nCount;++ i) {
       if (nonceListeners[i].Equals (listener)) {
-        RemoveAt (i);
-        result = true;
-        break;
+        RemoveOnceAt (i);
+        return true;
       }
     }
-    return result;
+    return false;
   }
 
-  public void RemoveAllListeners (bool removePersistant = true, bool removeNonce = true) {
-    if (removePersistant) {
+  // Remove all listeners.
+  public void RemoveAllListeners (bool removePersistent = true, bool removeNonce = true) {
+    if (removePersistent) {
       Array.Clear (listeners, 0, (int)pCap);
-
       pCount = 0;
     }
     if (removeNonce && nCount > 0) {
@@ -97,32 +83,28 @@ public abstract class TocsinBase<TDelegate>: ILinkBase<TDelegate> where TDelegat
     }
   }
 
-  protected void RemoveAt (uint i) { pCount = RemoveAt (listeners, pCount, i); }
+  // Utility methods for internal array management.
+  protected void RemoveAt (uint i) => pCount = RemoveAt (listeners, pCount, i);
+  protected void RemoveOnceAt (uint i) => nCount = RemoveAt (nonceListeners, nCount, i);
 
-  protected void RemoveOnceAt (uint i) { nCount = RemoveAt (nonceListeners, nCount, i); }
-
-  protected uint RemoveAt (TDelegate[] arr, uint pCount, uint i) {
-    -- pCount;
-    for (uint j = i;j < pCount;++ j) {
-      arr[j] = arr[j + 1];
+  protected static uint RemoveAt (TDelegate[] arr, uint count, uint index) {
+    for (uint i = index;i < count - 1;++ i) {
+      arr[i] = arr[i + 1];
     }
-    arr[pCount] = null;
-    return pCount;
+    arr[-- count] = null;
+    return count;
   }
 
-  bool Contains (TDelegate[] arr, uint c, TDelegate d) {
-    for (uint i = 0;i < c;++ i) {
-      if (arr[i].Equals (d)) {
-        return true;
-      }
+  protected static bool Contains (TDelegate[] arr, uint count, TDelegate item) {
+    for (uint i = 0;i < count;++ i) {
+      if (arr[i].Equals (item)) return true;
     }
     return false;
   }
-  TDelegate[] Expand (TDelegate[] arr, uint cap, uint count) {
-    TDelegate[] newArr = new TDelegate[cap];
-    for (int i = 0;i < count;++ i) {
-      newArr[i] = arr[i];
-    }
+
+  protected static TDelegate[] Expand (TDelegate[] arr, uint newCapacity, uint count) {
+    var newArr = new TDelegate[newCapacity];
+    Array.Copy (arr, newArr, count);
     return newArr;
   }
 }
